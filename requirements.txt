@@ -1,5 +1,7 @@
 ansible
+os_client_config
 pbr
 PyYAML
 python-keystoneclient
 python-heatclient
+shade

@@ -22,6 +22,7 @@ import shutil
 import socket
 import logging
 import argparse
+import os_client_config
 import subprocess
 from distutils.version import LooseVersion
 from ConfigParser import ConfigParser, NoOptionError, NoSectionError
@@ -432,6 +433,53 @@ def _run_vagrant(environment):
     return 0
 
 
+def _run_os_client_config(cloud, vm_config):
+    ssh_config = """
+Host *
+  User ubuntu
+  ForwardAgent yes
+  UserKnownHostsFile /dev/null
+  StrictHostKeyChecking no
+  PasswordAuthentication no
+"""
+    with open("tmp/ssh_config", "w") as text_file:
+        text_file.write(ssh_config)
+    for vm in vm_config:
+        public_key_file = vm['public_key_file']
+        key_name = None
+        if public_key_file is not None:
+            if public_key_file.startswith('~'):
+                public_key_file = os.path.exanduser(key_location)
+            if not public_key_file.startswith('/'):
+                public_key_file = os.path.abspath(key_location)
+            with open(public_key_file, 'r') as key_file:
+                key = key_file.read()
+            key_name = vm['name'] + '_key'
+            key_pair = cloud.get_keypair(key_name)
+            if (key_pair is None or key_pair.public_key != key):
+                cloud.create_keypair(key_name, key)
+            key_file.close()
+        server = cloud.get_server(vm['name'])
+        if server is None:
+            server = cloud.create_server(vm['name'], image=vm['image'],
+                                         flavor=vm['flavor'],
+                                         key_name=key_name)
+        ssh_config_pre = """
+Host {server}
+  Hostname {ip}
+  IdentityFile {key_file}
+"""
+#TODO: get ip from server object
+        ssh_config = ssh_config_pre.format(
+        server=vm['name'], ip=ip, key_file=vm['private_key_file'])
+
+        with open("tmp/ssh_config", "a") as text_file:
+            text_file.write(ssh_config)
+
+    _append_envvar("ANSIBLE_SSH_ARGS", "-F tmp/ssh_config")
+    return 0
+
+
 def run(args, extra_args):
     _set_default_env()
 
@@ -480,6 +528,30 @@ def run(args, extra_args):
         if os.path.exists(heat_extra_args) and os.path.isfile(heat_extra_args):
             extra_args += ['--extra-vars', '@%s' % heat_extra_args]
         rc = _run_heat(args=args, hot=hot)
+        if rc:
+            return rc
+        if not args.ursula_user:
+            args.ursula_user = "ubuntu"
+        if not args.ursula_sudo:
+            args.ursula_sudo = True
+    if args.provisioner == "os-client-config"
+        os_client_config_file = "%s/clouds.yml" % args.environment
+        vm_config_file = "%s/vms.yml" % args.environment
+        if not os.path.exists(os_client_config_file):
+            print "os-client-config file at %s does not exist." % os_client_config_file
+            print "Attempting to use openrc environment vars."
+        if not os.path.exists(vm_config_file):
+            raise Exception(
+                "os-client-config provider requires a vm-config file "
+                "at %s" % vm_config_file)
+        osc_config = os_client_config.OpenStackConfig(config_files={os_client_config_file})
+        cloud_names = osc_config.get_cloud_names()
+        first_cloud = cloud_names.pop(0)
+        cloud = osc_config.get_one_cloud(cloud=first_cloud)
+
+        with open(vm_config_file, 'r') as vm_config_handle:
+            vm_config = yaml.load(vm_config_handle)
+        rc = _run_os_client_config(cloud, vm_config)
         if rc:
             return rc
         if not args.ursula_user:
