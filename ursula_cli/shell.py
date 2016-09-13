@@ -548,7 +548,6 @@ def run(args, extra_args):
         cloud_names = osc_config.get_cloud_names()
         first_cloud = cloud_names.pop(0)
         cloud = osc_config.get_one_cloud(cloud=first_cloud)
-
         with open(vm_config_file, 'r') as vm_config_handle:
             vm_config = yaml.load(vm_config_handle)
         rc = _run_os_client_config(cloud, vm_config)
